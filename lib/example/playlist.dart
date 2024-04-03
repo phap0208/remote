@@ -130,21 +130,32 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   @override
   void initState() {
     super.initState();
-    // Listen to changes on the entire songQueue reference
-    FirebaseDatabase.instance.ref().child('yokaratv/rooms/${widget.roomId}/songQueue').onValue.listen((event) {
-      // Handle the snapshot to update the playlist
+    // Lắng nghe sự thay đổi trên toàn bộ tham chiếu của songQueue
+    FirebaseDatabase.instance
+        .ref()
+        .child('yokaratv/rooms/${widget.roomId}/songQueue')
+        .onValue
+        .listen((event) {
+      // Xử lý dữ liệu snapshot để cập nhật danh sách phát
       final dataSnapshot = event.snapshot;
-      final List<PlaylistModel> currentSongs = [];
+      List<PlaylistModel> queueSongs = [];
       if (dataSnapshot.value != null) {
         (dataSnapshot.value as Map).forEach((key, value) {
-          // Assuming value is the song data, you need to parse it accordingly
+          // Giả sử giá trị là dữ liệu của bài hát, bạn cần phân tích nó tương ứng
           final song = PlaylistModel.fromJson(value);
-          currentSongs.add(song);
+          print(value);
+          queueSongs.add(song);
         });
       }
-      // Update the playlist with the current songs
-      setState(() {
-        widget.playlist.songs = currentSongs;
+
+      // In giá trị của currentSongs để kiểm tra
+      print('Current Songs: $queueSongs');
+      // Sắp xếp danh sách phát theo trường timestamp
+      queueSongs.sort((a, b) => (b.timestamp ?? 0).compareTo(a.timestamp ?? 0));
+      print('Current Songs: $queueSongs');
+      // Cập nhật danh sách phát với các bài hát hiện tại
+       setState(() {
+        widget.playlist.songs = queueSongs;
       });
     });
   }
@@ -169,7 +180,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               icon: Icon(Icons.remove_circle),
               onPressed: () async {
                 setState(() {
-                  widget.onRemove(song);
                   widget.playlist.removeSong(song, song.videoId);
                   widget.playlist.songs.remove(song);
                 });
