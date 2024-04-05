@@ -90,6 +90,32 @@ class Playlist {
     }
   }
 
+  Future<void> prioritizeSong(PlaylistModel song, String? videoId) async {
+    try {
+      final dio = Dio();
+      print('IDPlay1: ${roomId}');
+      final queryParams = {
+        'roomId': '$roomId',
+        'videoId': videoId??'',
+      };
+      final response = await dio.post(
+        "https://us-central1-ikara-development.cloudfunctions.net/ktv1_prioritizeSong-prioritizeSong",
+        options: Options(headers: {
+          HttpHeaders.contentTypeHeader: "application/json",
+        }),
+        data: jsonEncode(queryParams),
+      );
+      if (response.statusCode == 200) {
+        print('IDPlay2: ${roomId}');
+        print('Bài hát đã được ưu tiên !');
+      } else {
+        print('Lỗi khi ưu tiên bài hát: ${response.data}');
+      }
+    } catch (error) {
+      print('Đã xảy ra lỗi: $error');
+    }
+  }
+
   Future<void> pauseAndPlaySong(PlaylistModel song) async {
     try {
       final dio = Dio();
@@ -127,9 +153,14 @@ class PlaylistScreen extends StatefulWidget {
 }
 
 class _PlaylistScreenState extends State<PlaylistScreen> {
+  bool isThirdSongAdded = false;
+  int currentlyPlayingIndex = 0;
+
   @override
   void initState() {
     super.initState();
+    print(
+        'Widget Room ID: ${widget.roomId}'); // In ra giá trị của widget.roomId
     // Lắng nghe sự thay đổi trên toàn bộ tham chiếu của songQueue
     FirebaseDatabase.instance
         .ref()
@@ -138,24 +169,34 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         .listen((event) {
       // Xử lý dữ liệu snapshot để cập nhật danh sách phát
       final dataSnapshot = event.snapshot;
-      List<PlaylistModel> queueSongs = [];
+      print("hhhhb: ${dataSnapshot.value}");
+      List<PlaylistModel> newqueueSongs = [];
       if (dataSnapshot.value != null) {
         (dataSnapshot.value as Map).forEach((key, value) {
           // Giả sử giá trị là dữ liệu của bài hát, bạn cần phân tích nó tương ứng
           final song = PlaylistModel.fromJson(value);
-          print(value);
-          queueSongs.add(song);
+          newqueueSongs.add(song);
         });
       }
-
-      // In giá trị của currentSongs để kiểm tra
-      print('Current Songs: $queueSongs');
+      for (var song in newqueueSongs) {
+        print('Timestamp: ${song.timestamp}, VideoId: ${song.videoId}');
+      }
       // Sắp xếp danh sách phát theo trường timestamp
-      queueSongs.sort((a, b) => (b.timestamp ?? 0).compareTo(a.timestamp ?? 0));
-      print('Current Songs: $queueSongs');
+      newqueueSongs.sort((a, b) =>
+          (a.timestamp ?? 0).compareTo(b.timestamp ?? 0));
+      print('After sorting:');
+      for (var song in newqueueSongs) {
+        print('Timestamp: ${song.timestamp}, VideoId: ${song.videoId}');
+      }
+      print(" hr: $newqueueSongs");
+      print('Current Songs: $newqueueSongs');
       // Cập nhật danh sách phát với các bài hát hiện tại
-       setState(() {
-        widget.playlist.songs = queueSongs;
+      setState(() {
+        widget.playlist.songs = newqueueSongs;
+        // Kiểm tra xem đã thêm bài hát từ thứ ba trở đi chưa
+        if (newqueueSongs.length >= 3) {
+          isThirdSongAdded = true;
+        }
       });
     });
   }
@@ -170,26 +211,69 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         itemCount: widget.playlist.songs.length,
         itemBuilder: (context, index) {
           final PlaylistModel song = widget.playlist.songs[index];
+          final bool isFirstSong = index ==
+              0; // Kiểm tra xem đây có phải là bài hát đầu tiên không
+          final bool isCurrentlyPlaying = isFirstSong && widget.playlist
+              .isPlaying; // Kiểm tra xem bài hát hiện tại có đang phát không
           return ListTile(
             key: ValueKey(song.id),
-            title: Text(song.songName ?? ''),
-            leading: CircleAvatar(
-              backgroundImage: NetworkImage(song.thumbnailUrl ?? ''),
+            title: Text(
+              song.songName ?? '',
+              style: TextStyle(
+                fontWeight: index == currentlyPlayingIndex ? FontWeight.bold : FontWeight.normal,
+              ),
             ),
-            trailing: IconButton(
-              icon: Icon(Icons.remove_circle),
-              onPressed: () async {
-                setState(() {
-                  widget.playlist.removeSong(song, song.videoId);
-                  widget.playlist.songs.remove(song);
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(' Đã xóa bài hát '),
-                    duration: Duration(milliseconds: 300),
+            leading: Container(
+              width: 60, // Điều chỉnh kích thước của thumbnailUrl
+              height: 60,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                image: DecorationImage(
+                  fit: BoxFit.cover,
+                  image: NetworkImage(song.thumbnailUrl ?? ''),
+                ),
+              ),
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (index > 0 &&
+                    isThirdSongAdded) // Chỉ hiển thị nút khi thỏa mãn điều kiện
+                  IconButton(
+                    icon: Icon(Icons.arrow_upward),
+                    onPressed: () async {
+                      // Gọi hàm prioritizeSong khi nút được nhấn
+                      await widget.playlist.prioritizeSong(song, song.videoId);
+                      setState(() {
+                        // Tìm vị trí của bài hát trong danh sách
+                        int currentIndex = widget.playlist.songs.indexOf(song);
+                        // Nếu bài hát không nằm ở đầu danh sách
+                        if (currentIndex > 0) {
+                          // Hoán đổi vị trí của bài hát với bài hát trước đó
+                          PlaylistModel temp = widget.playlist
+                              .songs[currentIndex - 1];
+                          widget.playlist.songs[currentIndex - 1] = song;
+                          widget.playlist.songs[currentIndex] = temp;
+                        }
+                      });
+                    },
                   ),
-                );
-              },
+                IconButton(
+                  icon: Icon(Icons.remove_circle),
+                  onPressed: () async {
+                    setState(() {
+                      widget.playlist.removeSong(song, song.videoId);
+                      widget.playlist.songs.remove(song);
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(' Đã xóa bài hát '),
+                        duration: Duration(milliseconds: 300),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
           );
         },
@@ -197,5 +281,6 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
     );
   }
 }
+
 
 
